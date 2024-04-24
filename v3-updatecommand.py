@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, render_template, send_from_directory
 
 from flask_cors import CORS
 import threading
@@ -64,6 +64,10 @@ def update_command():
         return 'Command updated successfully'
     except Exception as e:
         return f'Error: {str(e)}'
+
+@app.route('/input')
+def input_command():
+    return render_template('input_command.html')
 
 @app.route('/')
 def index():
