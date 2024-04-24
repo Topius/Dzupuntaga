@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GPS Tracker</title>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script> <!-- Axios for AJAX requests -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script> <!-- Leaflet for maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" /> <!-- Leaflet CSS -->
+    <style>
+        #map {
+            height: calc(100vh - 40px); /* Set map height to fill the entire viewport minus the height of the button */
+        }
+        #followButton {
+            position: absolute; /* Position the button absolutely */
+            top: 5px; /* 5px from the top */
+            left: 10px; /* 10px from the left */
+            z-index: 1000; /* Ensure button appears above the map */
+        }
+        #trackerSelect {
+            position: absolute;
+            top: 5px;
+            left: 150px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <button id="followButton">Follow Tracker</button> <!-- Button to toggle follow mode -->
+    <select id="trackerSelect" onchange="changeFollowedTracker()">
+        <option value="">Select a tracker to follow</option>
+        <!-- Options will be populated by JavaScript -->
+    </select>
+    <div id="map"></div> <!-- Map container -->
+
+    <script>
+        // Initialize the map
+        var map = L.map('map').setView([41.7551, 44.8571], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        var trackerMarkers = {}; // Object to hold markers for each tracker data
+        var trackerPolylines = {}; // Object to hold polylines for each tracker data
+        var followMode = false; // Flag to indicate follow mode
+        var followedTrackerId = null; // ID of the tracker being followed
+
+        // Function to update the map with the latest data for all trackers
+        function updateTrackers() {
+            axios.get('http://127.0.0.1:5000/all_trackers')  // Fetch data for all trackers from Flask server
+                .then(function (response) {
+                    const allTrackers = response.data;
+
+                    // Populate dropdown with tracker options
+                    populateDropdownAndFollow(allTrackers);
+
+                    // Loop through each tracker data
+                    allTrackers.forEach(function (tracker) {
+                        const trackerId = tracker.tracker_id;
+                        const trackerName = tracker.tracker_name;
+                        const trackerData = tracker.data;
+
+                        // Create or update marker and polyline for this tracker
+                        if (!trackerMarkers[trackerId]) {
+                            var randomColor = getRandomColor(); // Get a random color for the new tracker
+                            var trackerIcon = new L.Icon({
+                                iconUrl: 'path/to/marker-icon.png', // Provide the path to your marker icon
+                                iconSize: [25, 41], // Size of the icon
+                                iconAnchor: [12, 41], // Point of the icon which will correspond to marker's location
+                                popupAnchor: [1, -34], // Point from which the popup should open relative to the iconAnchor
+                                shadowUrl: 'static/marker-shadow.png', // Optional: Provide the path to your marker shadow
+                                shadowSize: [41, 41]  // Size of the shadow
+                            });
+
+                            // Set the color of the marker to the one randomly generated
+                            trackerIcon.options.iconUrl = `data:image/svg+xml;base64,${btoa(getColoredMarkerSvg(randomColor))}`;
+
+                            trackerMarkers[trackerId] = L.marker(
+                                [trackerData[0].latitude, trackerData[0].longitude],
+                                { icon: trackerIcon }
+                            ).addTo(map).bindPopup(tracker.tracker_name);
+
+                            trackerPolylines[trackerId] = L.polyline([], { color: randomColor }).addTo(map);
+                        }
+
+                        // Update marker position and polyline with latest data
+                        trackerMarkers[trackerId].setLatLng([trackerData[trackerData.length - 1].latitude, trackerData[trackerData.length - 1].longitude]);
+                        trackerPolylines[trackerId].setLatLngs(trackerData.map(function(location) {
+                            return [location.latitude, location.longitude];
+                        }));
+                    });
+
+                    // If in follow mode, set the map view to center on the last data point of the followed tracker without changing zoom level
+                    if (followMode && followedTrackerId) {
+                        const followedTracker = allTrackers.find(tracker => tracker.tracker_id === followedTrackerId);
+                        if (followedTracker) {
+                            const lastTrackerData = followedTracker.data;
+                            map.panTo(new L.LatLng(lastTrackerData[lastTrackerData.length - 1].latitude, lastTrackerData[lastTrackerData.length - 1].longitude));
+                        }
+                    }
+                })
+                .catch(function (error) {
+                    console.error("Error fetching tracker data:", error);
+                });
+        }
+
+        // Function to toggle follow mode
+        function toggleFollowMode() {
+            followMode = !followMode; // Toggle follow mode
+            document.getElementById('followButton').innerText = followMode ? 'Stop Following Tracker' : 'Follow Tracker';
+        }
+
+        // Function to generate random color
+        function getRandomColor() {
+            return '#' + Math.floor(Math.random() * 16777215).toString(16);
+        }
+
+        // Function to populate dropdown with tracker options and update the map to follow the selected tracker
+        function populateDropdownAndFollow(allTrackers) {
+            var select = document.getElementById('trackerSelect');
+            select.innerHTML = '<option value="">Select a tracker to follow</option>'; // Reset dropdown
+
+            // Populate dropdown with tracker options
+            allTrackers.forEach(function(tracker) {
+                var option = document.createElement('option');
+                option.value = tracker.tracker_id;
+                option.textContent = tracker.tracker_name;
+                select.appendChild(option);
+            });
+
+            // Update the function to change the followed tracker based on the dropdown selection
+            window.changeFollowedTracker = function() {
+                followedTrackerId = select.value;
+                if (followedTrackerId) {
+                    followMode = true;
+                } else {
+                    followMode = false;
+                }
+            }
+        }
+
+        // Function to generate an SVG marker with a specific color
+        function getColoredMarkerSvg(color) {
+            return `<svg xmlns="http://www.w3.org/2000/svg" width="25" height="41" viewBox="0 0 25 41"><path fill="${color}" d="M12.5,0C5.6,0,0,5.6,0,12.5C0,20.4,12.5,41,12.5,41S25,20.4,25,12.5C25,5.6,19.4,0,12.5,0z"/><circle fill="#FFFFFF" cx="12.5" cy="12.5" r="7"/></svg>`;
+        }
+
+        // Fetch the initial set of tracker data and then update every 3 seconds
+        updateTrackers();
+        setInterval(updateTrackers, 3000);
+
+        // Event listener to handle button click event for toggling follow mode
+        document.getElementById('followButton').addEventListener('click', toggleFollowMode);
+    </script>
+</body>
+</html>
